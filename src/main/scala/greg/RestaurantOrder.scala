@@ -14,9 +14,43 @@ trait HandleOrder {
   def handleOrder(order: RestaurantOrder)
 }
 
+trait Startable {
+  def start
+}
+
 class OrderPrinter extends HandleOrder {
   def handleOrder(order: RestaurantOrder): Unit =
     println(RestaurantOrder.asJsonString(order))
+}
+
+class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends HandleOrder with Startable {
+  val mailbox = mutable.Queue[RestaurantOrder]()
+
+  def count = mailbox.size
+
+  def start: Unit = {
+    new Thread(new Runnable {
+      def run(): Unit = {
+        while(true) {
+          if(mailbox.isEmpty) Thread.sleep(1000) else {
+            val order = mailbox.dequeue()
+            println(s"$name dequeued ${order.id}, mailbox=${mailbox}")
+            try {
+              handler.handleOrder(order)
+            } catch {
+              case e: Throwable => println(s"Order $order failed with Throwable $e")
+            }
+          }
+        }
+      }
+    }).start()
+  }
+
+
+  def handleOrder(order: RestaurantOrder): Unit = {
+    println(s"$name queue, mailbox=$mailbox")
+    mailbox.enqueue(order)
+  }
 }
 
 class Multiplexer(handleOrders: List[HandleOrder]) extends HandleOrder {
@@ -55,7 +89,7 @@ class Cook(nextHandler: HandleOrder, name: String = "Unnamed") extends HandleOrd
   )
 
   def handleOrder(order: RestaurantOrder): Unit = {
-    println(s"${this.getClass.getSimpleName}:$name: Starting cooking")
+    println(s"${this.getClass.getSimpleName}:$name: Starting cooking ${order.id}")
     Thread.sleep(2000)
 
     val ingredients: List[String] = order.lineItems.flatMap(li => cookbook.get(li.name) match {
@@ -94,11 +128,15 @@ class Cashier(nextHandler: HandleOrder) extends HandleOrder {
     pendingOrders = pendingOrders + (order.id -> order)
   }
 
-  def paid(orderId: UUID) = {
-    pendingOrders.get(orderId).fold(println(s"Already paid: $orderId")){ order =>
+  def paid(orderId: UUID): Boolean = {
+    if(pendingOrders.contains(orderId)) {
+      val order = pendingOrders(orderId)
       println(s"${this.getClass.getSimpleName}: Paying $orderId")
       pendingOrders = pendingOrders - orderId
       nextHandler.handleOrder(order.paid(true))
+      true
+    } else {
+      false
     }
   }
 }
