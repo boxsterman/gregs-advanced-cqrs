@@ -11,6 +11,8 @@ object OrderRunner extends App {
   //  val cashier = new Cashier(new OrderPrinter)
   val bus121 = new TopicBasedPubSub
 
+  bus121.subscribe(OrderPaid.toString, new CountingHandler("Paid orders"))
+
   val cashier = new Cashier(bus121)
   bus121.subscribe(OrderPriced.toString, cashier)
 

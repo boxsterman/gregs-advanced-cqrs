@@ -37,13 +37,30 @@ trait CanSubscribe {
 
 class TopicBasedPubSub extends CanPublish with CanSubscribe{
   var subscribers: Map[String, List[HandleOrder]] = Map()
-  def publish(name: String, order: RestaurantOrder): Unit = subscribers.getOrElse(name,Nil).foreach(_.handleOrder(order))
-  def subscribe(name: String, handler: HandleOrder): Unit = subscribers = subscribers + (name -> (handler :: subscribers.getOrElse(name, Nil)))
+
+  def publish(name: String, order: RestaurantOrder): Unit = {
+    subscribers.getOrElse(name,Nil).foreach(_.handleOrder(order))
+  }
+
+  def subscribe(name: String, handler: HandleOrder): Unit =
+    subscribers.synchronized {
+      subscribers = subscribers + (name -> (handler :: subscribers.getOrElse(name, Nil)))
+    }
 }
 
 class OrderPrinter extends HandleOrder {
   def handleOrder(order: RestaurantOrder): Unit =
     println(RestaurantOrder.asJsonString(order))
+}
+
+class CountingHandler(name: String) extends HandleOrder {
+
+  var count = 0
+
+  def handleOrder(order: RestaurantOrder): Unit = {
+    count = count + 1
+    println(s"Counting $name: $count")
+  }
 }
 
 class NullHandler extends HandleOrder {
@@ -53,6 +70,7 @@ class NullHandler extends HandleOrder {
 class TTLHandler(handler: HandleOrder) extends HandleOrder {
   def handleOrder(order: RestaurantOrder): Unit = order match {
     case o: HaveTTL if o.ttl > System.currentTimeMillis() =>
+      handler.handleOrder(o)
     case o: HaveTTL =>
       println(s"Dropping order ${o.id}")
     case o: RestaurantOrder =>
@@ -145,7 +163,6 @@ class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String
       case None => throw new RuntimeException(s"Can not cook: ${li.name}")
       case Some(is) => is
     })
-
     publisher.publish(FoodCooked.toString, order.ingredients(ingredients))
   }
 }
