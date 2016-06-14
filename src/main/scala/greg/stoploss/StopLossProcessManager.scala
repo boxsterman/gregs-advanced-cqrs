@@ -1,6 +1,6 @@
-package greg
+package greg.stoploss
 
-class StopLossProcessManager(publisher: Message => Unit) {
+class StopLossProcessManager(publisher: MessageX => Unit) {
 
   var stopLossPrice = -1
   var window11secs: List[Int] = Nil
@@ -8,7 +8,7 @@ class StopLossProcessManager(publisher: Message => Unit) {
   // 'sold' is required since we can't just terminate
   var sold = false
 
-  def handleMessage(m: Message) = m match  {
+  def handleMessage(m: MessageX) = m match  {
 
     case PositionAcquired(p) =>
       stopLossPrice = p

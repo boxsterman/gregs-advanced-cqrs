@@ -1,4 +1,4 @@
-package greg
+package greg.stoploss
 
 import org.scalatest.{Matchers, WordSpec}
 
@@ -218,6 +218,6 @@ class StopLossProcessManagerSpec extends  WordSpec with Matchers {
 }
 
 abstract class TestScope {
-  var events: List[Message] = Nil
+  var events: List[MessageX] = Nil
   val pm = new StopLossProcessManager(m => events = events ::: List(m))
 }

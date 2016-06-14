@@ -1,10 +1,10 @@
-package greg
+package greg.restaurant
 
 import org.scalatest.{Matchers, WordSpec}
 import play.api.libs.json.Json
 
 
-class OrderAsserter[T <: Event](next: Handler[T])(assert: T => Unit) extends Handler[T] {
+class OrderAsserter[T <: Message](next: Handler[T])(assert: T => Unit) extends Handler[T] {
 
   def handle(t: T): Unit = {
     assert(t)

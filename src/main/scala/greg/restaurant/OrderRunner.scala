@@ -1,6 +1,6 @@
-import java.util.UUID
+package greg.restaurant
 
-import greg.{AssistantManager, _}
+import java.util.UUID
 
 object OrderRunner extends App {
 
