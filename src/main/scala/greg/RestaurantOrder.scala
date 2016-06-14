@@ -23,6 +23,10 @@ class OrderPrinter extends HandleOrder {
     println(RestaurantOrder.asJsonString(order))
 }
 
+class NullHandler extends HandleOrder {
+  def handleOrder(order: RestaurantOrder): Unit = {}
+}
+
 class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends HandleOrder with Startable {
 //  val mailbox = mutable.Queue[RestaurantOrder]()
   val mailbox = new java.util.concurrent.ConcurrentLinkedQueue[RestaurantOrder]
@@ -72,6 +76,16 @@ class RoundRobin(handleOrders: List[HandleOrder]) extends HandleOrder {
   }
 }
 
+class MFDispatcher(handleOrders: List[ThreadedHandler]) extends HandleOrder {
+
+  def handleOrder(order: RestaurantOrder): Unit =
+    handleOrders.find(th => th.count < 5).fold{
+      Thread.sleep(100)
+      handleOrder(order)
+    }(th => th.handleOrder(order))
+}
+
+
 // aka "the publisher"
 class Waiter(nextHandler: HandleOrder) {
   def placeOrder(tableNumber: Int, lineItems: List[LineItem]): UUID = {
@@ -109,7 +123,7 @@ class AssistantManager(nextHandler: HandleOrder) extends HandleOrder {
 
   def handleOrder(order: RestaurantOrder): Unit = {
     println(s"${this.getClass.getSimpleName}: Calculate ${order.id}")
-    Thread.sleep(1000)
+    Thread.sleep(500)
     val total = order.lineItems.foldLeft(0)((t, li) => t + (priceList.get(li.name) match {
       case None => throw new RuntimeException(s"Can not price item: ${li.name}")
       case Some(x) => x

@@ -8,24 +8,23 @@ object OrderRunner extends App {
 
   // setup
   println("=> setup")
-  val cashier = new Cashier(new OrderPrinter)
+//  val cashier = new Cashier(new OrderPrinter)
+  val cashier = new Cashier(new NullHandler)
   val assi = new ThreadedHandler(new AssistantManager(cashier), "assi")
   val cookAnke = new ThreadedHandler(new Cook(assi, 500, "Anke"), "Anke")
   val cookCarsten = new ThreadedHandler(new Cook(assi, 800, "Carsten"), "Carsten")
   val cookSven = new ThreadedHandler(new Cook(assi, 1200, "Sven"), "Sven")
-  val waiter = new Waiter(new RoundRobin(List(cookAnke, cookCarsten, cookSven)))
+  val mfDispatcher = new ThreadedHandler(new MFDispatcher(List(cookAnke, cookCarsten, cookSven)), "MFDispatcher")
+  val waiter = new Waiter(mfDispatcher)
 
+  val ths = List(assi, cookAnke, cookSven, cookCarsten, mfDispatcher)
   // start
   println("=> start")
-  assi.start
-  cookAnke.start
-  cookCarsten.start
-  cookSven.start
+  ths.foreach(_.start)
 
   new Thread(new Runnable {
     def run(): Unit = {
       println("Monitor started")
-      val ths = List(assi, cookAnke, cookCarsten, cookSven)
       while(true) {
         ths.foreach(th => print(s"${th.name}: ${th.count} "))
         println("")
