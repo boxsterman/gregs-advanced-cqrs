@@ -8,3 +8,4 @@ scalacOptions += "-deprecation"
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test"
 libraryDependencies += "com.typesafe.play" %% "play-json" % "2.3.10"
+libraryDependencies += "com.geteventstore" %% "eventstore-client" % "2.2.2"
