@@ -24,7 +24,8 @@ class OrderPrinter extends HandleOrder {
 }
 
 class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends HandleOrder with Startable {
-  val mailbox = mutable.Queue[RestaurantOrder]()
+//  val mailbox = mutable.Queue[RestaurantOrder]()
+  val mailbox = new java.util.concurrent.ConcurrentLinkedQueue[RestaurantOrder]
 
   def count = mailbox.size
 
@@ -33,8 +34,8 @@ class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends Ha
       def run(): Unit = {
         while(true) {
           if(mailbox.isEmpty) Thread.sleep(1000) else {
-            val order = mailbox.dequeue()
-            println(s"$name dequeued ${order.id}, mailbox=${mailbox}")
+            val order = mailbox.poll()
+//            println(s"$name dequeued ${order.id}, mailbox=${mailbox}")
             try {
               handler.handleOrder(order)
             } catch {
@@ -48,8 +49,8 @@ class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends Ha
 
 
   def handleOrder(order: RestaurantOrder): Unit = {
-    println(s"$name queue, mailbox=$mailbox")
-    mailbox.enqueue(order)
+//    println(s"$name queue, mailbox=$mailbox")
+    mailbox.offer(order)
   }
 }
 
@@ -82,7 +83,7 @@ class Waiter(nextHandler: HandleOrder) {
 }
 
 // aka "the enricher"
-class Cook(nextHandler: HandleOrder, name: String = "Unnamed") extends HandleOrder {
+class Cook(nextHandler: HandleOrder, cookingTimeInMillis: Long = 1000, name: String = "Unnamed") extends HandleOrder {
 
   val cookbook: Map[String, List[String]] = Map(
     "Steak" -> List("A really good piece of meat", "olive oil", "pepper", "salt")
@@ -90,7 +91,7 @@ class Cook(nextHandler: HandleOrder, name: String = "Unnamed") extends HandleOrd
 
   def handleOrder(order: RestaurantOrder): Unit = {
     println(s"${this.getClass.getSimpleName}:$name: Starting cooking ${order.id}")
-    Thread.sleep(2000)
+    Thread.sleep(cookingTimeInMillis)
 
     val ingredients: List[String] = order.lineItems.flatMap(li => cookbook.get(li.name) match {
       case None => throw new RuntimeException(s"Can not cook: ${li.name}")
