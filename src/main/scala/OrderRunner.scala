@@ -8,14 +8,22 @@ object OrderRunner extends App {
 
   // setup
   println("=> setup")
-//  val cashier = new Cashier(new OrderPrinter)
-  val cashier = new Cashier(new OrderPrinter)
-  val assi = new ThreadedHandler(new AssistantManager(cashier), "assi")
-  val cookAnke = new ThreadedHandler(new TTLHandler(new Cook(assi, 200, "Anke")), "Anke")
-  val cookCarsten = new ThreadedHandler(new TTLHandler(new Cook(assi, 300, "Carsten")), "Carsten")
-  val cookSven = new ThreadedHandler(new TTLHandler(new Cook(assi, 500, "Paul")), "Paul")
+  //  val cashier = new Cashier(new OrderPrinter)
+  val bus121 = new TopicBasedPubSub
+
+  val cashier = new Cashier(bus121)
+  bus121.subscribe(OrderPriced.toString, cashier)
+
+  val assi = new ThreadedHandler(new AssistantManager(bus121), "assi")
+  bus121.subscribe(FoodCooked.toString, assi)
+
+  val cookAnke = new ThreadedHandler(new TTLHandler(new Cook(bus121, 200, "Anke")), "Anke")
+  val cookCarsten = new ThreadedHandler(new TTLHandler(new Cook(bus121, 300, "Carsten")), "Carsten")
+  val cookSven = new ThreadedHandler(new TTLHandler(new Cook(bus121, 500, "Paul")), "Paul")
   val mfDispatcher = new ThreadedHandler(new MFDispatcher(List(cookAnke, cookCarsten, cookSven)), "MFDispatcher")
-  val waiter = new Waiter(mfDispatcher)
+  bus121.subscribe(OrderPlaced.toString, mfDispatcher)
+
+  val waiter = new Waiter(bus121)
 
   val ths = List(assi, cookAnke, cookSven, cookCarsten, mfDispatcher)
   // start

@@ -7,6 +7,11 @@ import play.api.libs.json._
 import scala.collection.mutable
 import scala.util.Try
 
+sealed trait Topic
+object OrderPlaced extends Topic
+object FoodCooked extends Topic
+object OrderPriced extends Topic
+object OrderPaid extends Topic
 
 case class LineItem(name: String, qty: Int)
 
@@ -20,6 +25,20 @@ trait Startable {
 
 trait HaveTTL {
   def ttl: Long
+}
+
+trait CanPublish {
+  def publish(name: String, order: RestaurantOrder)
+}
+
+trait CanSubscribe {
+  def subscribe(name: String, handler: HandleOrder)
+}
+
+class TopicBasedPubSub extends CanPublish with CanSubscribe{
+  var subscribers: Map[String, List[HandleOrder]] = Map()
+  def publish(name: String, order: RestaurantOrder): Unit = subscribers.getOrElse(name,Nil).foreach(_.handleOrder(order))
+  def subscribe(name: String, handler: HandleOrder): Unit = subscribers = subscribers + (name -> (handler :: subscribers.getOrElse(name, Nil)))
 }
 
 class OrderPrinter extends HandleOrder {
@@ -102,17 +121,17 @@ class MFDispatcher(handleOrders: List[ThreadedHandler]) extends HandleOrder {
 
 
 // aka "the publisher"
-class Waiter(nextHandler: HandleOrder) {
+class Waiter(publisher: CanPublish) {
   def placeOrder(tableNumber: Int, lineItems: List[LineItem]): UUID = {
     val newOrder = new RestaurantOrder().tableNumber(tableNumber).lineItems(lineItems)
     println(s"${this.getClass.getSimpleName}: Place order ${newOrder.id}")
-    nextHandler.handleOrder(newOrder)
+    publisher.publish(OrderPlaced.toString, newOrder)
     newOrder.id
   }
 }
 
 // aka "the enricher"
-class Cook(nextHandler: HandleOrder, cookingTimeInMillis: Long = 1000, name: String = "Unnamed") extends HandleOrder {
+class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String = "Unnamed") extends HandleOrder {
 
   val cookbook: Map[String, List[String]] = Map(
     "Steak" -> List("A really good piece of meat", "olive oil", "pepper", "salt")
@@ -127,12 +146,12 @@ class Cook(nextHandler: HandleOrder, cookingTimeInMillis: Long = 1000, name: Str
       case Some(is) => is
     })
 
-    nextHandler.handleOrder(order.ingredients(ingredients))
+    publisher.publish(FoodCooked.toString, order.ingredients(ingredients))
   }
 }
 
 // aka "the enricher"
-class AssistantManager(nextHandler: HandleOrder) extends HandleOrder {
+class AssistantManager(bus: CanPublish) extends HandleOrder {
 
   val priceList: Map[String, Int] = Map("Steak" -> 34)
 
@@ -144,12 +163,12 @@ class AssistantManager(nextHandler: HandleOrder) extends HandleOrder {
       case Some(x) => x
     }) * li.qty)
     val taxes = total * 0.14
-    nextHandler.handleOrder(order.total(total).tax(taxes))
+    bus.publish(OrderPriced.toString, order.total(total).tax(taxes))
   }
 }
 
 // aka "the controller"
-class Cashier(nextHandler: HandleOrder) extends HandleOrder {
+class Cashier(publisher: CanPublish) extends HandleOrder {
 
   var pendingOrders: Map[UUID, RestaurantOrder] = Map()
 
@@ -165,7 +184,7 @@ class Cashier(nextHandler: HandleOrder) extends HandleOrder {
       val order = pendingOrders(orderId)
       println(s"${this.getClass.getSimpleName}: Paying $orderId")
       pendingOrders = pendingOrders - orderId
-      nextHandler.handleOrder(order.paid(true))
+      publisher.publish(OrderPaid.toString, order.paid(true))
       true
     } else {
       false

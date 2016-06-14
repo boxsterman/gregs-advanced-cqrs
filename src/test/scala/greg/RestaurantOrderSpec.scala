@@ -28,43 +28,43 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
 
   "A Restaurant Order" should {
 
-    "have the waiter placing an order" in {
-      new Waiter(new OrderAsserter(new OrderPrinter)({ o =>
-        o.tableNumber should equal(42)
-        o.lineItems should have size(1)
-      })).placeOrder(42, List(LineItem("Steak", 1)))
-    }
-
-    "have the cook preparing a placed order" in {
-      new Waiter(new Cook(new OrderAsserter(new OrderPrinter)({ o =>
-        o.tableNumber should equal(42)
-        o.lineItems should have size(1)
-        o.ingredients should have size 4
-      }))).placeOrder(42, List(LineItem("Steak", 1)))
-    }
-
-    "have the assistant manager pricing the order" in {
-      new Waiter(new Cook(new AssistantManager(new OrderAsserter(new OrderPrinter)({ o =>
-        o.tableNumber should equal(42)
-        o.lineItems should have size(1)
-        o.ingredients should have size 4
-        o.total should equal(34.0)
-      })))).placeOrder(42, List(LineItem("Steak", 1)))
-    }
-
-    "have the cashier getting paid" in {
-      val cashier = new Cashier(new OrderAsserter(new OrderPrinter)({ o =>
-        o.tableNumber should equal(42)
-        o.lineItems should have size(1)
-        o.ingredients should have size 4
-        o.total should equal(34.0)
-      }))
-
-      val waiter = new Waiter(new Cook(new AssistantManager(cashier)))
-
-      val orderId = waiter.placeOrder(42, List(LineItem("Steak", 1)))
-      cashier.paid(orderId)
-    }
+//    "have the waiter placing an order" in {
+//      new Waiter(new OrderAsserter(new OrderPrinter)({ o =>
+//        o.tableNumber should equal(42)
+//        o.lineItems should have size(1)
+//      })).placeOrder(42, List(LineItem("Steak", 1)))
+//    }
+//
+//    "have the cook preparing a placed order" in {
+//      new Waiter(new Cook(new OrderAsserter(new OrderPrinter)({ o =>
+//        o.tableNumber should equal(42)
+//        o.lineItems should have size(1)
+//        o.ingredients should have size 4
+//      }))).placeOrder(42, List(LineItem("Steak", 1)))
+//    }
+//
+//    "have the assistant manager pricing the order" in {
+//      new Waiter(new Cook(new AssistantManager(new OrderAsserter(new OrderPrinter)({ o =>
+//        o.tableNumber should equal(42)
+//        o.lineItems should have size(1)
+//        o.ingredients should have size 4
+//        o.total should equal(34.0)
+//      })))).placeOrder(42, List(LineItem("Steak", 1)))
+//    }
+//
+//    "have the cashier getting paid" in {
+//      val cashier = new Cashier(new OrderAsserter(new OrderPrinter)({ o =>
+//        o.tableNumber should equal(42)
+//        o.lineItems should have size(1)
+//        o.ingredients should have size 4
+//        o.total should equal(34.0)
+//      }))
+//
+//      val waiter = new Waiter(new Cook(new AssistantManager(cashier)))
+//
+//      val orderId = waiter.placeOrder(42, List(LineItem("Steak", 1)))
+//      cashier.paid(orderId)
+//    }
 
   }
 
