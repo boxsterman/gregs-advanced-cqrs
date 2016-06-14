@@ -9,11 +9,11 @@ object OrderRunner extends App {
   // setup
   println("=> setup")
 //  val cashier = new Cashier(new OrderPrinter)
-  val cashier = new Cashier(new NullHandler)
+  val cashier = new Cashier(new OrderPrinter)
   val assi = new ThreadedHandler(new AssistantManager(cashier), "assi")
-  val cookAnke = new ThreadedHandler(new Cook(assi, 500, "Anke"), "Anke")
-  val cookCarsten = new ThreadedHandler(new Cook(assi, 800, "Carsten"), "Carsten")
-  val cookSven = new ThreadedHandler(new Cook(assi, 1200, "Sven"), "Sven")
+  val cookAnke = new ThreadedHandler(new TTLHandler(new Cook(assi, 200, "Anke")), "Anke")
+  val cookCarsten = new ThreadedHandler(new TTLHandler(new Cook(assi, 300, "Carsten")), "Carsten")
+  val cookSven = new ThreadedHandler(new TTLHandler(new Cook(assi, 500, "Paul")), "Paul")
   val mfDispatcher = new ThreadedHandler(new MFDispatcher(List(cookAnke, cookCarsten, cookSven)), "MFDispatcher")
   val waiter = new Waiter(mfDispatcher)
 
@@ -37,14 +37,43 @@ object OrderRunner extends App {
   println("=> run")
   var orderIds: List[UUID] = (1 to 100).map(i => waiter.placeOrder(42, List(LineItem("Steak", 1)))).toList
 
-  while(orderIds.nonEmpty) {
-    orderIds.toList.foreach{ orderId =>
-      if(cashier.paid(orderId)) orderIds = orderIds diff List(orderId)
-    }
+  // Variant: only pay pending orders
+  while(true) {
+    cashier.ordersToPay.foreach(cashier.paid)
     Thread.sleep(500)
   }
+
+  // Variant: all placed orders must be paid
+//  while(orderIds.nonEmpty) {
+//    orderIds.toList.foreach{ orderId =>
+//      if(cashier.paid(orderId)) orderIds = orderIds diff List(orderId)
+//    }
+//    Thread.sleep(500)
+//  }
 
   // done
   println(s"=> done in ${System.currentTimeMillis() - start} ms")
   System.exit(0)
+
+//
+//  def payFor(orderIds: List[UUID]): Unit = orderIds match {
+//    case Nil =>
+//    case x :: xs =>
+//      if(cashier.paid(x))
+//        payFor(xs)
+//      else {
+//        payFor(xs ::: List(x))
+//        Thread.sleep(500)
+//      }
+//  }
+//
+//  def payFor(orderIds: List[UUID], unpaid: List[UUID]): List[UUID] = orderIds match {
+//    case Nil => unpaid
+//    case x :: xs =>
+//      if(cashier.paid(x))
+//        payFor(xs, unpaid)
+//      else {
+//        payFor(xs, )
+//      }
+//  }
 }

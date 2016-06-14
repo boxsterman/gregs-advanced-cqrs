@@ -18,6 +18,10 @@ trait Startable {
   def start
 }
 
+trait HaveTTL {
+  def ttl: Long
+}
+
 class OrderPrinter extends HandleOrder {
   def handleOrder(order: RestaurantOrder): Unit =
     println(RestaurantOrder.asJsonString(order))
@@ -26,6 +30,17 @@ class OrderPrinter extends HandleOrder {
 class NullHandler extends HandleOrder {
   def handleOrder(order: RestaurantOrder): Unit = {}
 }
+
+class TTLHandler(handler: HandleOrder) extends HandleOrder {
+  def handleOrder(order: RestaurantOrder): Unit = order match {
+    case o: HaveTTL if o.ttl > System.currentTimeMillis() =>
+    case o: HaveTTL =>
+      println(s"Dropping order ${o.id}")
+    case o: RestaurantOrder =>
+      handler.handleOrder(o)
+  }
+}
+
 
 class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends HandleOrder with Startable {
 //  val mailbox = mutable.Queue[RestaurantOrder]()
@@ -138,6 +153,8 @@ class Cashier(nextHandler: HandleOrder) extends HandleOrder {
 
   var pendingOrders: Map[UUID, RestaurantOrder] = Map()
 
+  def ordersToPay = pendingOrders.keys.toList
+
   def handleOrder(order: RestaurantOrder): Unit = {
     println(s"${this.getClass.getSimpleName}: Ready for payment ${order.id}")
     pendingOrders = pendingOrders + (order.id -> order)
@@ -156,7 +173,7 @@ class Cashier(nextHandler: HandleOrder) extends HandleOrder {
   }
 }
 
-class RestaurantOrder(val json: JsObject = JsObject(List("id" -> JsString(UUID.randomUUID().toString)))) {
+class RestaurantOrder(val json: JsObject = JsObject(List("id" -> JsString(UUID.randomUUID().toString))), val ttl: Long = System.currentTimeMillis() + 3000) extends HaveTTL {
 
   implicit val lineItemFormat = Json.format[LineItem]
 
