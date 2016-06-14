@@ -11,19 +11,19 @@ object OrderRunner extends App {
   //  val cashier = new Cashier(new OrderPrinter)
   val bus121 = new TopicBasedPubSub
 
-  bus121.subscribe(OrderPaid.toString, new CountingHandler("Paid orders"))
+  bus121.subscribe(new CountingHandler("Paid orders"))
 
   val cashier = new Cashier(bus121)
-  bus121.subscribe(OrderPriced.toString, cashier)
+  bus121.subscribe(cashier)
 
   val assi = new ThreadedHandler(new AssistantManager(bus121), "assi")
-  bus121.subscribe(FoodCooked.toString, assi)
+  bus121.subscribe(assi)
 
   val cookAnke = new ThreadedHandler(new TTLHandler(new Cook(bus121, 200, "Anke")), "Anke")
   val cookCarsten = new ThreadedHandler(new TTLHandler(new Cook(bus121, 300, "Carsten")), "Carsten")
   val cookSven = new ThreadedHandler(new TTLHandler(new Cook(bus121, 500, "Paul")), "Paul")
   val mfDispatcher = new ThreadedHandler(new MFDispatcher(List(cookAnke, cookCarsten, cookSven)), "MFDispatcher")
-  bus121.subscribe(OrderPlaced.toString, mfDispatcher)
+  bus121.subscribe(mfDispatcher)
 
   val waiter = new Waiter(bus121)
 

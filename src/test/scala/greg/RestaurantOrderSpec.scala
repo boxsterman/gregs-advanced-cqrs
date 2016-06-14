@@ -4,10 +4,11 @@ import org.scalatest.{Matchers, WordSpec}
 import play.api.libs.json.Json
 
 
-class OrderAsserter(next: HandleOrder)(assert: RestaurantOrder => Unit) extends HandleOrder {
-  def handleOrder(order: RestaurantOrder): Unit = {
-    assert(order)
-    next.handleOrder(order)
+class OrderAsserter[T <: Event](next: Handler[T])(assert: T => Unit) extends Handler[T] {
+
+  def handle(t: T): Unit = {
+    assert(t)
+    next.handle(t)
   }
 }
 

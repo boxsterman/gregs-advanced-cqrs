@@ -5,18 +5,22 @@ import java.util.UUID
 import play.api.libs.json._
 
 import scala.collection.mutable
+import scala.reflect.ClassTag
 import scala.util.Try
-
-sealed trait Topic
-object OrderPlaced extends Topic
-object FoodCooked extends Topic
-object OrderPriced extends Topic
-object OrderPaid extends Topic
 
 case class LineItem(name: String, qty: Int)
 
-trait HandleOrder {
-  def handleOrder(order: RestaurantOrder)
+trait Event {
+  val id = UUID.randomUUID()
+}
+
+case class OrderPlaced(order: RestaurantOrder, ttl: Long = System.currentTimeMillis() + 3000) extends Event with HaveTTL
+case class OrderCooked(order: RestaurantOrder) extends Event
+case class OrderPriced(order: RestaurantOrder) extends Event
+case class OrderPaid(order: RestaurantOrder) extends Event
+
+trait Handler[T <: Event] {
+  def handle(t: T)
 }
 
 trait Startable {
@@ -28,60 +32,67 @@ trait HaveTTL {
 }
 
 trait CanPublish {
-  def publish(name: String, order: RestaurantOrder)
+  def publish[T <: Event](event: T)(implicit ct: ClassTag[T])
 }
 
 trait CanSubscribe {
-  def subscribe(name: String, handler: HandleOrder)
+  def subscribe[T <: Event](handler: Handler[T])(implicit ct: ClassTag[T])
 }
 
 class TopicBasedPubSub extends CanPublish with CanSubscribe{
-  var subscribers: Map[String, List[HandleOrder]] = Map()
+  var subscribers: Map[String, List[Handler[_ <: Event]]] = Map()
 
-  def publish(name: String, order: RestaurantOrder): Unit = {
-    subscribers.getOrElse(name,Nil).foreach(_.handleOrder(order))
+  def publish[T <: Event](event: T)(implicit ct: ClassTag[T]): Unit = {
+    subscribers.getOrElse(ct.runtimeClass.getSimpleName ,Nil).foreach{ handler =>
+      handler.asInstanceOf[Handler[T]].handle(event)
+    }
   }
 
-  def subscribe(name: String, handler: HandleOrder): Unit =
+  def subscribe[T <: Event](handler: Handler[T])(implicit ct: ClassTag[T]): Unit =
     subscribers.synchronized {
+      val name = ct.runtimeClass.getSimpleName
       subscribers = subscribers + (name -> (handler :: subscribers.getOrElse(name, Nil)))
     }
 }
 
-class OrderPrinter extends HandleOrder {
-  def handleOrder(order: RestaurantOrder): Unit =
-    println(RestaurantOrder.asJsonString(order))
+class OrderPrinter extends Handler[Event] {
+
+  def handle(t: Event): Unit = println(s"Printer: $t")
+
+//  def handleOrder(order: RestaurantOrder): Unit =
+//    println(RestaurantOrder.asJsonString(order))
 }
 
-class CountingHandler(name: String) extends HandleOrder {
+class CountingHandler(name: String) extends Handler[OrderPaid] {
 
   var count = 0
 
-  def handleOrder(order: RestaurantOrder): Unit = {
+  def handle(t: OrderPaid): Unit =  {
     count = count + 1
-    println(s"Counting $name: $count")
+    println(s"Counting $name: $count for new order $t")
   }
 }
 
-class NullHandler extends HandleOrder {
-  def handleOrder(order: RestaurantOrder): Unit = {}
+class NullHandler extends Handler[Event] {
+  def handle(t: Event): Unit = {}
 }
 
-class TTLHandler(handler: HandleOrder) extends HandleOrder {
-  def handleOrder(order: RestaurantOrder): Unit = order match {
-    case o: HaveTTL if o.ttl > System.currentTimeMillis() =>
-      handler.handleOrder(o)
-    case o: HaveTTL =>
-      println(s"Dropping order ${o.id}")
-    case o: RestaurantOrder =>
-      handler.handleOrder(o)
+class TTLHandler[T <: Event](handler: Handler[T]) extends Handler[T] {
+
+  def handle(t: T): Unit = t match {
+    case e: HaveTTL if e.ttl > System.currentTimeMillis() =>
+      handler.handle(t)
+    case e: HaveTTL =>
+      println(s"Dropping order ${e.id}")
+    case e =>
+      handler.handle(e)
   }
 }
 
 
-class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends HandleOrder with Startable {
-//  val mailbox = mutable.Queue[RestaurantOrder]()
-  val mailbox = new java.util.concurrent.ConcurrentLinkedQueue[RestaurantOrder]
+class ThreadedHandler[T <: Event](handler: Handler[T], val name: String = "n/a") extends Handler[T] with Startable {
+
+  val mailbox = new java.util.concurrent.ConcurrentLinkedQueue[T]
 
   def count = mailbox.size
 
@@ -90,12 +101,12 @@ class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends Ha
       def run(): Unit = {
         while(true) {
           if(mailbox.isEmpty) Thread.sleep(1000) else {
-            val order = mailbox.poll()
+            val event = mailbox.poll()
 //            println(s"$name dequeued ${order.id}, mailbox=${mailbox}")
             try {
-              handler.handleOrder(order)
+              handler.handle(event)
             } catch {
-              case e: Throwable => println(s"Order $order failed with Throwable $e")
+              case e: Throwable => println(s"Order $event failed with Throwable $e")
             }
           }
         }
@@ -104,37 +115,37 @@ class ThreadedHandler(handler: HandleOrder, val name: String = "n/a") extends Ha
   }
 
 
-  def handleOrder(order: RestaurantOrder): Unit = {
-//    println(s"$name queue, mailbox=$mailbox")
-    mailbox.offer(order)
+  def handle(event: T): Unit = {
+    mailbox.offer(event)
   }
 }
 
-class Multiplexer(handleOrders: List[HandleOrder]) extends HandleOrder {
-  def handleOrder(order: RestaurantOrder): Unit = handleOrders.foreach(_.handleOrder(order))
+class Multiplexer[T <: Event](handleOrders: List[Handler[T]]) extends Handler[T] {
+
+  def handle(t: T): Unit = handleOrders.foreach(_.handle(t))
 }
 
-class RoundRobin(handleOrders: List[HandleOrder]) extends HandleOrder {
-  val queue = mutable.Queue[HandleOrder]()
+class RoundRobin[T <: Event](handleOrders: List[Handler[T]]) extends Handler[T] {
+  val queue = mutable.Queue[Handler[T]]()
   queue ++= handleOrders
 
-  def handleOrder(order: RestaurantOrder): Unit = {
+  def handle(t: T): Unit = {
     val h = queue.dequeue()
     try {
-      h.handleOrder(order)
+      h.handle(t)
     } finally {
       queue.enqueue(h)
     }
   }
 }
 
-class MFDispatcher(handleOrders: List[ThreadedHandler]) extends HandleOrder {
+class MFDispatcher[T <: Event](handlers: List[ThreadedHandler[T]]) extends Handler[T] {
 
-  def handleOrder(order: RestaurantOrder): Unit =
-    handleOrders.find(th => th.count < 5).fold{
+  def handle(t: T): Unit =
+    handlers.find(th => th.count < 5).fold{
       Thread.sleep(100)
-      handleOrder(order)
-    }(th => th.handleOrder(order))
+      handle(t)
+    }(th => th.handle(t))
 }
 
 
@@ -143,19 +154,20 @@ class Waiter(publisher: CanPublish) {
   def placeOrder(tableNumber: Int, lineItems: List[LineItem]): UUID = {
     val newOrder = new RestaurantOrder().tableNumber(tableNumber).lineItems(lineItems)
     println(s"${this.getClass.getSimpleName}: Place order ${newOrder.id}")
-    publisher.publish(OrderPlaced.toString, newOrder)
+    publisher.publish(OrderPlaced(newOrder))
     newOrder.id
   }
 }
 
 // aka "the enricher"
-class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String = "Unnamed") extends HandleOrder {
+class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String = "Unnamed") extends Handler[OrderPlaced] {
 
   val cookbook: Map[String, List[String]] = Map(
     "Steak" -> List("A really good piece of meat", "olive oil", "pepper", "salt")
   )
 
-  def handleOrder(order: RestaurantOrder): Unit = {
+  def handle(t: OrderPlaced): Unit =  {
+    val order = t.order
     println(s"${this.getClass.getSimpleName}:$name: Starting cooking ${order.id}")
     Thread.sleep(cookingTimeInMillis)
 
@@ -163,16 +175,17 @@ class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String
       case None => throw new RuntimeException(s"Can not cook: ${li.name}")
       case Some(is) => is
     })
-    publisher.publish(FoodCooked.toString, order.ingredients(ingredients))
+    publisher.publish(OrderCooked(order.ingredients(ingredients)))
   }
 }
 
 // aka "the enricher"
-class AssistantManager(bus: CanPublish) extends HandleOrder {
+class AssistantManager(bus: CanPublish) extends Handler[OrderCooked] {
 
   val priceList: Map[String, Int] = Map("Steak" -> 34)
 
-  def handleOrder(order: RestaurantOrder): Unit = {
+  def handle(t: OrderCooked): Unit = {
+    val order = t.order
     println(s"${this.getClass.getSimpleName}: Calculate ${order.id}")
     Thread.sleep(500)
     val total = order.lineItems.foldLeft(0)((t, li) => t + (priceList.get(li.name) match {
@@ -180,20 +193,20 @@ class AssistantManager(bus: CanPublish) extends HandleOrder {
       case Some(x) => x
     }) * li.qty)
     val taxes = total * 0.14
-    bus.publish(OrderPriced.toString, order.total(total).tax(taxes))
+    bus.publish(OrderPriced(order.total(total).tax(taxes)))
   }
 }
 
 // aka "the controller"
-class Cashier(publisher: CanPublish) extends HandleOrder {
+class Cashier(publisher: CanPublish) extends Handler[OrderPriced] {
 
   var pendingOrders: Map[UUID, RestaurantOrder] = Map()
 
   def ordersToPay = pendingOrders.keys.toList
 
-  def handleOrder(order: RestaurantOrder): Unit = {
-    println(s"${this.getClass.getSimpleName}: Ready for payment ${order.id}")
-    pendingOrders = pendingOrders + (order.id -> order)
+  def handle(t: OrderPriced): Unit = {
+    println(s"${this.getClass.getSimpleName}: Ready for payment ${t.order.id}")
+    pendingOrders = pendingOrders + (t.order.id -> t.order)
   }
 
   def paid(orderId: UUID): Boolean = {
@@ -201,7 +214,7 @@ class Cashier(publisher: CanPublish) extends HandleOrder {
       val order = pendingOrders(orderId)
       println(s"${this.getClass.getSimpleName}: Paying $orderId")
       pendingOrders = pendingOrders - orderId
-      publisher.publish(OrderPaid.toString, order.paid(true))
+      publisher.publish(OrderPaid(order.paid(true)))
       true
     } else {
       false
