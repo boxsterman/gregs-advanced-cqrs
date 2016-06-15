@@ -27,7 +27,7 @@ object OrderRunner extends App {
 
   val waiter = new Waiter(bus121)
 
-  val midgetHouse = new ThreadedHandler(new MidgetHouse(bus121, bus121))
+  val midgetHouse = new ThreadedHandler(new MidgetHouse(bus121, bus121), "MidgetHouse")
   bus121.subscribe(midgetHouse)
 
   val ths = List(assi, cookAnke, cookPaul, cookCarsten, mfDispatcher, midgetHouse)

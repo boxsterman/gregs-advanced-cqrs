@@ -105,8 +105,6 @@ class Scheduler(publish: CanPublish) extends Handler[DelayedPublish] with Starta
   }
 }
 
-
-
 trait Midget extends Handler[Message]{
   val corrId: String
   def start()
@@ -114,14 +112,25 @@ trait Midget extends Handler[Message]{
 
 case class CookingFailed(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 
-class PayAfterMidget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget {
+trait DelayedCookingFailed {
+
+  def pub: CanPublish
+
+  var foodCooked = false
+
+  def pubDelayed(order: RestaurantOrder, corrId: String, causeId: String) =
+    pub.publish(DelayedPublish(CookingFailed(order, corrId, causeId), 4, "", ""))
+
+}
+
+
+class PayAfterMidget(val pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget with DelayedCookingFailed {
 
   val corrId = op.corrId
-  var foodCooked = false
 
   def start() = {
     pub.publish(CookFood(op.order, op.corrId, op.msgId))
-    pub.publish(DelayedPublish(CookingFailed(op.order, op.corrId, op.msgId), 4, "", ""))
+    pubDelayed(op.order, op.corrId, op.msgId)
   }
 
   def handle(t: Message): Unit = t match {
@@ -145,20 +154,35 @@ class PayAfterMidget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget =
   }
 }
 
-class PayFirstMidget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget{
+class PayFirstMidget(val pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget with DelayedCookingFailed {
 
-    val corrId = op.corrId
+  val corrId = op.corrId
 
-    def start() =
-      pub.publish(PriceOrder(op.order, op.corrId, op.msgId))
+  def start() =
+    pub.publish(PriceOrder(op.order, op.corrId, op.msgId))
 
-    def handle(t: Message): Unit = t match {
-      case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
-      case m: OrderPaid => pub.publish(CookFood(m.order, m.corrId, m.msgId))
-      case m: FoodCooked => completeHandler(this)
-      case _ =>
-    }
+  def handle(t: Message): Unit = t match {
+
+    case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
+
+    case m: OrderPaid =>
+      pub.publish(CookFood(m.order, m.corrId, m.msgId))
+      pubDelayed(op.order, op.corrId, op.msgId)
+
+    case m: FoodCooked if !foodCooked =>
+      foodCooked = true
+      completeHandler(this)
+
+    case m: FoodCooked if foodCooked =>
+      println(s"===> Ignoring second FoodCooked: $m")
+
+    case m: CookingFailed if !foodCooked =>
+      println(s"===> CookingFailed: $m - re-cook!!")
+      pub.publish(CookFood(m.order, m.corrId, m.msgId))
+
+    case _ =>
   }
+}
 
 class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlaced] {
 
@@ -209,9 +233,6 @@ object EventStorePubSub extends CanPublish with CanSubscribe {
         context.system.terminate()
     }
   }
-
-
-  def publish[T <: Message](name: String, event: T): Unit = ???
 
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = ???
 
