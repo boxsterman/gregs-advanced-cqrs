@@ -29,24 +29,181 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       | }
     """.stripMargin))
 
-  "A midget" should {
+  "A PayAfterMidget" should {
 
     "respond properly" in {
 
       var events: List[Message] = Nil
+      var migdetCompleted = false
       val bus = new CanPublish {
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
       }
 
       val order = RestaurantOrder.newOrder(UUID.randomUUID())
       val orderPlaced = OrderPlaced(order, "17", "no")
-      val m = new Midget(bus, orderPlaced, x => ())
+      val m = new PayAfterMidget(bus, orderPlaced, x => migdetCompleted = true)
 
       m.start()
 
+      migdetCompleted shouldBe false
       events.size should equal(1)
       events.head.corrId should equal("17")
       events.head.causeId should equal(orderPlaced.msgId)
+      events.head match {
+        case e: CookFood =>
+        case e => fail(s"Unexpected type: $e")
+      }
+
+      events = Nil
+
+      val foodCooked = FoodCooked(order, "17", "no")
+      m.handle(foodCooked)
+
+      migdetCompleted shouldBe false
+      events.size should equal(1)
+      events.head.corrId should equal("17")
+      events.head.causeId should equal(foodCooked.msgId)
+      events.head match {
+        case e: PriceOrder =>
+        case e => fail(s"Unexpected type: $e")
+      }
+
+      events = Nil
+
+      val orderPriced = OrderPriced(order, "17", "no")
+      m.handle(orderPriced)
+
+      migdetCompleted shouldBe false
+      events.size should equal(1)
+      events.head.corrId should equal("17")
+      events.head.causeId should equal(orderPriced.msgId)
+      events.head match {
+        case e: TakePayment =>
+        case e => fail(s"Unexpected type: $e")
+      }
+
+      events = Nil
+
+      val orderPaid = OrderPaid(order, "17", "no")
+      m.handle(orderPaid)
+
+      migdetCompleted shouldBe true
+      events.size should equal(0)
+    }
+
+  }
+
+  "A PayFirstMidget" should {
+
+    "respond properly" in {
+
+      var events: List[Message] = Nil
+      var midgetCompleted = false
+
+      val bus = new CanPublish {
+        def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+      }
+
+      val order = RestaurantOrder.newOrder(UUID.randomUUID())
+      val orderPlaced = OrderPlaced(order, "17", "no")
+      val m = new PayFirstMidget(bus, orderPlaced, x => midgetCompleted = true)
+
+      m.start()
+
+      midgetCompleted shouldBe false
+      events.size should equal(1)
+      events.head.corrId should equal("17")
+      events.head.causeId should equal(orderPlaced.msgId)
+      events.head match {
+        case e: PriceOrder=>
+        case e => fail(s"Unexpected type: $e")
+      }
+
+      events = Nil
+
+      val orderPriced = OrderPriced(order, "17", "no")
+      m.handle(orderPriced)
+
+      midgetCompleted shouldBe false
+      events.size should equal(1)
+      events.head.corrId should equal("17")
+      events.head.causeId should equal(orderPriced.msgId)
+      events.head match {
+        case e: TakePayment =>
+        case e => fail(s"Unexpected type: $e")
+      }
+
+      events = Nil
+
+      val orderPaid = OrderPaid(order, "17", "no")
+      m.handle(orderPaid)
+
+      midgetCompleted shouldBe false
+      events.size should equal(1)
+      events.head.corrId should equal("17")
+      events.head.causeId should equal(orderPaid.msgId)
+      events.head match {
+        case e: CookFood =>
+        case e => fail(s"Unexpected type: $e")
+      }
+
+      events = Nil
+
+      val foodCooked = FoodCooked(order, "17", "no")
+      m.handle(foodCooked)
+
+      midgetCompleted shouldBe true
+      events.size should equal(0)
+
+    }
+
+  }
+
+  "A MidgetHouse" should {
+    "create PayFirstMidget for dodgy order" in {
+
+      var events: List[Message] = Nil
+      val bus = new CanPublish with CanSubscribe {
+
+        def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassManifest[T]): Unit = ???
+
+        def subscribe[T <: Message](name: String, handler: Handler[T]): Unit = ???
+
+        def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+      }
+
+      val mh = new MidgetHouse(bus, bus)
+      val order = RestaurantOrder.newOrder(UUID.randomUUID()).isDodgy(true)
+      val orderPlaced = OrderPlaced(order, "17", "no")
+
+      mh.midgetForOrder(bus,orderPlaced) match {
+        case m: PayFirstMidget =>
+        case m =>  fail(s"Unexpected type: $m")
+      }
+
+    }
+
+    "create PayAfterMidget for non dodgy order" in {
+
+      var events: List[Message] = Nil
+      val bus = new CanPublish with CanSubscribe {
+
+        def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassManifest[T]): Unit = ???
+
+        def subscribe[T <: Message](name: String, handler: Handler[T]): Unit = ???
+
+        def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+      }
+
+      val mh = new MidgetHouse(bus, bus)
+      val order = RestaurantOrder.newOrder(UUID.randomUUID()).isDodgy(false)
+      val orderPlaced = OrderPlaced(order, "17", "no")
+
+      mh.midgetForOrder(bus,orderPlaced) match {
+        case m: PayAfterMidget =>
+        case m =>  fail(s"Unexpected type: $m")
+      }
+
     }
 
   }

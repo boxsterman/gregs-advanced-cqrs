@@ -19,10 +19,10 @@ object OrderRunner extends App {
   val assi = new ThreadedHandler(new AssistantManager(bus121), "assi")
   bus121.subscribe(assi)
 
-  val cookAnke = new ThreadedHandler(new TTLHandler(new Cook(bus121, 200, "Anke")), "Anke")
-  val cookCarsten = new ThreadedHandler(new TTLHandler(new Cook(bus121, 300, "Carsten")), "Carsten")
-  val cookSven = new ThreadedHandler(new TTLHandler(new Cook(bus121, 500, "Paul")), "Paul")
-  val mfDispatcher = new ThreadedHandler(new MFDispatcher(List(cookAnke, cookCarsten, cookSven)), "MFDispatcher")
+  val cookAnke = new ThreadedHandler(new RandomFailureHandler(new TTLHandler(new Cook(bus121, 200, "Anke")), 0.05d), "Anke")
+  val cookCarsten = new ThreadedHandler(new RandomFailureHandler(new TTLHandler(new Cook(bus121, 300, "Carsten")), 0.1d), "Carsten")
+  val cookPaul = new ThreadedHandler(new RandomFailureHandler(new TTLHandler(new Cook(bus121, 500, "Paul")), 0.2d), "Paul")
+  val mfDispatcher = new ThreadedHandler(new MFDispatcher(List(cookAnke, cookCarsten, cookPaul)), "MFDispatcher")
   bus121.subscribe(mfDispatcher)
 
   val waiter = new Waiter(bus121)
@@ -30,7 +30,7 @@ object OrderRunner extends App {
   val midgetHouse = new ThreadedHandler(new MidgetHouse(bus121, bus121))
   bus121.subscribe(midgetHouse)
 
-  val ths = List(assi, cookAnke, cookSven, cookCarsten, mfDispatcher, midgetHouse)
+  val ths = List(assi, cookAnke, cookPaul, cookCarsten, mfDispatcher, midgetHouse)
 
   // start
   println("=> start")
@@ -49,10 +49,10 @@ object OrderRunner extends App {
 
   // run it
   println("=> run")
-  var orderIds: List[UUID] = (1 to 2).map{ i =>
+  var orderIds: List[UUID] = (1 to 10).map{ i =>
     val newOrderId = UUID.randomUUID()
     bus121.subscribe(newOrderId.toString, new OrderTracer)
-    waiter.placeOrder(newOrderId, 42, List(LineItem("Steak", 1)))
+    waiter.placeOrder(RestaurantOrder.newOrder(newOrderId).tableNumber(42).lineItems(List(LineItem("Steak", 1))).isDodgy(true))
   }.toList
 
 
@@ -62,37 +62,8 @@ object OrderRunner extends App {
     Thread.sleep(500)
   }
 
-  // Variant: all placed orders must be paid
-//  while(orderIds.nonEmpty) {
-//    orderIds.toList.foreach{ orderId =>
-//      if(cashier.paid(orderId)) orderIds = orderIds diff List(orderId)
-//    }
-//    Thread.sleep(500)
-//  }
-
   // done
   println(s"=> done in ${System.currentTimeMillis() - start} ms")
   System.exit(0)
 
-//
-//  def payFor(orderIds: List[UUID]): Unit = orderIds match {
-//    case Nil =>
-//    case x :: xs =>
-//      if(cashier.paid(x))
-//        payFor(xs)
-//      else {
-//        payFor(xs ::: List(x))
-//        Thread.sleep(500)
-//      }
-//  }
-//
-//  def payFor(orderIds: List[UUID], unpaid: List[UUID]): List[UUID] = orderIds match {
-//    case Nil => unpaid
-//    case x :: xs =>
-//      if(cashier.paid(x))
-//        payFor(xs, unpaid)
-//      else {
-//        payFor(xs, )
-//      }
-//  }
 }

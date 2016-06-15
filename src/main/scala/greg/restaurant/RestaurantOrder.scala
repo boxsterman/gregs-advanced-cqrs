@@ -77,17 +77,37 @@ class TopicBasedPubSub extends CanPublish with CanSubscribe{
     }
 }
 
-class Midget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] {
+trait Midget extends Handler[Message]{
+  val corrId: String
+  def start()
+}
+
+class PayAfterMidget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget {
+
+  val corrId = op.corrId
+
+  def start() =
+    pub.publish(CookFood(op.order, op.corrId, op.msgId))
+
+  def handle(t: Message): Unit = t match {
+    case m: FoodCooked => pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
+    case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
+    case m: OrderPaid => completeHandler(this)
+    case _ =>
+  }
+}
+
+class PayFirstMidget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget{
 
     val corrId = op.corrId
 
     def start() =
-      pub.publish(CookFood(op.order, op.corrId, op.msgId))
+      pub.publish(PriceOrder(op.order, op.corrId, op.msgId))
 
     def handle(t: Message): Unit = t match {
-      case m: FoodCooked => pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
       case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
-      case m: OrderPaid => completeHandler(this)
+      case m: OrderPaid => pub.publish(CookFood(m.order, m.corrId, m.msgId))
+      case m: FoodCooked => completeHandler(this)
       case _ =>
     }
   }
@@ -97,13 +117,13 @@ class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlace
   var midgetToCorrId: Map[String, Midget] = Map()
 
   def onComplete(m: Midget) = {
-    println(s"Midget completed: ${m.corrId}")
     midgetToCorrId = midgetToCorrId - m.corrId
+    println(s"Midget completed: ${m.corrId}, remaing active midgets: ${midgetToCorrId.size}")
   }
 
   def handle(t: OrderPlaced): Unit = {
     println(s"Creating new midget for ${t.corrId}")
-    val midget = new Midget(pub, t, onComplete)
+    val midget = midgetForOrder(pub, t)
     midget.start()
     midgetToCorrId = midgetToCorrId + (t.corrId -> midget)
     sub.subscribe(t.corrId, new Handler[Message] {
@@ -111,6 +131,9 @@ class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlace
     })
   }
 
+  def midgetForOrder(publish: CanPublish, t: OrderPlaced): Midget =
+    if(t.order.isDodgy) new PayFirstMidget(publish, t, onComplete)
+    else new PayAfterMidget(publish, t, onComplete)
 }
 
 
@@ -157,6 +180,15 @@ class OrderPrinter extends Handler[Message] {
 
 //  def handleOrder(order: RestaurantOrder): Unit =
 //    println(RestaurantOrder.asJsonString(order))
+}
+
+class RandomFailureHandler[T <: Message](handler: Handler[T], failureRate: Double) extends Handler[T] {
+  def handle(t: T): Unit =
+    if(Math.random() > failureRate)
+      handler.handle(t)
+    else {
+      println(s"====> Random failing: $t")
+    }
 }
 
 class CountingHandler(name: String) extends Handler[OrderPaid] {
@@ -247,8 +279,7 @@ class MFDispatcher[T <: Message](handlers: List[ThreadedHandler[T]]) extends Han
 
 // aka "the publisher"
 class Waiter(publisher: CanPublish) {
-  def placeOrder(orderId: UUID, tableNumber: Int, lineItems: List[LineItem]): UUID = {
-    val newOrder = RestaurantOrder.newOrder(orderId).tableNumber(tableNumber).lineItems(lineItems)
+  def placeOrder(newOrder: RestaurantOrder): UUID = {
     println(s"${this.getClass.getSimpleName}: Place order ${newOrder.id}")
     publisher.publish(OrderPlaced(newOrder, newOrder.id.toString, "initial"))
     newOrder.id
@@ -321,6 +352,12 @@ class Cashier(publisher: CanPublish) extends Handler[TakePayment] {
 class RestaurantOrder(val json: JsObject = JsObject(List("id" -> JsString(UUID.randomUUID().toString))), val ttl: Long = System.currentTimeMillis() + 3000) extends HaveTTL {
 
   implicit val lineItemFormat = Json.format[LineItem]
+
+  def isDodgy: Boolean = (json \ "isDodgy").as[Boolean]
+  def isDodgy(b: Boolean): RestaurantOrder = {
+    val newJson = json ++ JsObject(List("isDodgy" -> JsBoolean(b)))
+    RestaurantOrder.fromJsonString(Json.prettyPrint(newJson))
+  }
 
   def tableNumber: Int = (json \ "tableNumber").as[Int]
   def tableNumber(t: Int): RestaurantOrder = {
