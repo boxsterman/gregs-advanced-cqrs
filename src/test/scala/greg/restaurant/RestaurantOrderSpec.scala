@@ -36,6 +36,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       var events: List[Message] = Nil
       val bus = new CanPublish {
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+        def publish[T <: Message](name: String, event: T): Unit = events = event :: events
       }
 
       val s = new Scheduler(bus)
@@ -59,6 +60,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       var midgetCompleted = false
       val bus = new CanPublish {
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+        def publish[T <: Message](name: String, event: T): Unit = events = event :: events
       }
 
       val order = RestaurantOrder.newOrder(UUID.randomUUID())
@@ -124,6 +126,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
 
       val bus = new CanPublish {
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+        def publish[T <: Message](name: String, event: T): Unit = events = event :: events
       }
 
       val order = RestaurantOrder.newOrder(UUID.randomUUID())
@@ -192,6 +195,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
         def subscribe[T <: Message](name: String, handler: Handler[T]): Unit = ???
 
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+        def publish[T <: Message](name: String, event: T): Unit = events = event :: events
       }
 
       val mh = new MidgetHouse(bus, bus)
@@ -215,6 +219,8 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
         def subscribe[T <: Message](name: String, handler: Handler[T]): Unit = ???
 
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+        def publish[T <: Message](name: String, event: T): Unit = events = event :: events
+
       }
 
       val mh = new MidgetHouse(bus, bus)

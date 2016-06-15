@@ -43,6 +43,7 @@ trait HaveTTL {
 
 trait CanPublish {
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T])
+//  def publish[T <: Message](name: String, event: T)
 }
 
 trait CanSubscribe {
@@ -53,12 +54,13 @@ trait CanSubscribe {
 class TopicBasedPubSub extends CanPublish with CanSubscribe{
   var subscribers: Map[String, List[Handler[_ <: Message]]] = Map()
 
+
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = {
-    _publish(event.corrId, event)
-    _publish(ct.runtimeClass.getSimpleName, event)
+    publish(event.corrId, event)
+    publish(ct.runtimeClass.getSimpleName, event)
   }
 
-  def _publish[T <: Message](topic: String, event: T)(implicit ct: ClassTag[T]): Unit = {
+  def publish[T <: Message](topic: String, event: T): Unit = {
     val p = subscribers.getOrElse(topic ,Nil).map(x => x)
     p.foreach{ handler =>
       handler.asInstanceOf[Handler[T]].handle(event)
@@ -83,8 +85,9 @@ class Scheduler(publish: CanPublish) extends Handler[DelayedPublish] with Starta
 
   var msgsToPublish: List[(Long, Message)] = Nil
 
-  def handle(t: DelayedPublish): Unit =
+  def handle(t: DelayedPublish): Unit = {
     msgsToPublish = (System.currentTimeMillis() + t.delayInSecs * 1000, t.msg) :: msgsToPublish
+  }
 
   def start: Unit = {
     new Thread(new Runnable {
@@ -92,7 +95,6 @@ class Scheduler(publish: CanPublish) extends Handler[DelayedPublish] with Starta
         while(true) {
           val msgsDue = msgsToPublish.filter( x => x._1 < System.currentTimeMillis())
           msgsDue.foreach{ x =>
-            println(s"Publish delayed message: $x")
             publish.publish(x._2)
           }
           msgsToPublish = msgsToPublish diff msgsDue
@@ -110,17 +112,35 @@ trait Midget extends Handler[Message]{
   def start()
 }
 
+case class CookingFailed(order: RestaurantOrder, corrId: String, causeId: String) extends Message
+
 class PayAfterMidget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] with Midget {
 
   val corrId = op.corrId
+  var foodCooked = false
 
-  def start() =
+  def start() = {
     pub.publish(CookFood(op.order, op.corrId, op.msgId))
+    pub.publish(DelayedPublish(CookingFailed(op.order, op.corrId, op.msgId), 4, "", ""))
+  }
 
   def handle(t: Message): Unit = t match {
-    case m: FoodCooked => pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
+
+    case m: FoodCooked if foodCooked=>
+      println(s"===> Ignoring second FoodCooked")
+
+    case m: FoodCooked if !foodCooked=>
+      foodCooked = true
+      pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
+
     case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
+
     case m: OrderPaid => completeHandler(this)
+
+    case m: CookingFailed if !foodCooked =>
+      println(s"===> CookingFailed: $m - re-cook!!")
+      pub.publish(CookFood(m.order, m.corrId, m.msgId))
+
     case _ =>
   }
 }
@@ -191,6 +211,8 @@ object EventStorePubSub extends CanPublish with CanSubscribe {
   }
 
 
+  def publish[T <: Message](name: String, event: T): Unit = ???
+
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = ???
 
   def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T]): Unit = ???
@@ -239,7 +261,7 @@ class TTLHandler[T <: Message](handler: Handler[T]) extends Handler[T] {
     case e: HaveTTL if e.ttl > System.currentTimeMillis() =>
       handler.handle(t)
     case e: HaveTTL =>
-      println(s"Dropping order ${e.msgId}")
+      println(s"====> Dropping order ${e.msgId}")
     case e =>
       handler.handle(e)
   }

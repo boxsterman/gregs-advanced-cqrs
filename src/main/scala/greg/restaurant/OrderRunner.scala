@@ -32,9 +32,13 @@ object OrderRunner extends App {
 
   val ths = List(assi, cookAnke, cookPaul, cookCarsten, mfDispatcher, midgetHouse)
 
+  val scheduler = new Scheduler(bus121)
+  bus121.subscribe(scheduler)
+
   // start
   println("=> start")
   ths.foreach(_.start)
+  scheduler.start
 
   new Thread(new Runnable {
     def run(): Unit = {
@@ -52,7 +56,7 @@ object OrderRunner extends App {
   var orderIds: List[UUID] = (1 to 10).map{ i =>
     val newOrderId = UUID.randomUUID()
     bus121.subscribe(newOrderId.toString, new OrderTracer)
-    waiter.placeOrder(RestaurantOrder.newOrder(newOrderId).tableNumber(42).lineItems(List(LineItem("Steak", 1))).isDodgy(true))
+    waiter.placeOrder(RestaurantOrder.newOrder(newOrderId).tableNumber(42).lineItems(List(LineItem("Steak", 1))).isDodgy(false))
   }.toList
 
 
