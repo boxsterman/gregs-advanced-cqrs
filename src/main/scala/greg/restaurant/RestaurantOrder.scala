@@ -77,21 +77,21 @@ class TopicBasedPubSub extends CanPublish with CanSubscribe{
     }
 }
 
-class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlaced] {
-
-  var midgetToCorrId: Map[String, Midget] = Map()
-
-  class Midget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] {
+class Midget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] {
     val corrId = op.corrId
     pub.publish(CookFood(op.order, op.corrId, op.msgId))
 
     def handle(t: Message): Unit = t match {
       case m: FoodCooked => pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
       case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
-      case m: OrderPaid => onComplete(this)
+      case m: OrderPaid => completeHandler(this)
       case _ =>
     }
   }
+
+class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlaced] {
+
+  var midgetToCorrId: Map[String, Midget] = Map()
 
   def onComplete(m: Midget) = {
     println(s"Midget completed: ${m.corrId}")
