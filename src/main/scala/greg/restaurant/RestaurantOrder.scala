@@ -78,8 +78,11 @@ class TopicBasedPubSub extends CanPublish with CanSubscribe{
 }
 
 class Midget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] {
+
     val corrId = op.corrId
-    pub.publish(CookFood(op.order, op.corrId, op.msgId))
+
+    def start() =
+      pub.publish(CookFood(op.order, op.corrId, op.msgId))
 
     def handle(t: Message): Unit = t match {
       case m: FoodCooked => pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
@@ -101,6 +104,7 @@ class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlace
   def handle(t: OrderPlaced): Unit = {
     println(s"Creating new midget for ${t.corrId}")
     val midget = new Midget(pub, t, onComplete)
+    midget.start()
     midgetToCorrId = midgetToCorrId + (t.corrId -> midget)
     sub.subscribe(t.corrId, new Handler[Message] {
       def handle(t: Message): Unit = midget.handle(t)

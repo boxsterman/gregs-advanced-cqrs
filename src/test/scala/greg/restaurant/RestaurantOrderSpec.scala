@@ -1,5 +1,7 @@
 package greg.restaurant
 
+import java.util.UUID
+
 import org.scalatest.{Matchers, WordSpec}
 import play.api.libs.json.Json
 
@@ -26,6 +28,28 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       |   ]
       | }
     """.stripMargin))
+
+  "A midget" should {
+
+    "respond properly" in {
+
+      var events: List[Message] = Nil
+      val bus = new CanPublish {
+        def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+      }
+
+      val order = RestaurantOrder.newOrder(UUID.randomUUID())
+      val orderPlaced = OrderPlaced(order, "17", "no")
+      val m = new Midget(bus, orderPlaced, x => ())
+
+      m.start()
+
+      events.size should equal(1)
+      events.head.corrId should equal("17")
+      events.head.causeId should equal(orderPlaced.msgId)
+    }
+
+  }
 
   "A Restaurant Order" should {
 
