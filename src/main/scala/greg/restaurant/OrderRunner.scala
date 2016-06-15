@@ -28,6 +28,7 @@ object OrderRunner extends App {
   val waiter = new Waiter(bus121)
 
   val ths = List(assi, cookAnke, cookSven, cookCarsten, mfDispatcher)
+
   // start
   println("=> start")
   ths.foreach(_.start)

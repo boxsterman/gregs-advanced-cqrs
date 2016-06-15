@@ -15,17 +15,19 @@ import scala.util.Failure
 case class LineItem(name: String, qty: Int)
 
 trait Message {
-  val id = UUID.randomUUID()
+  val msgId = UUID.randomUUID().toString
+  val corrId: String
+  val causeId: String
 }
 
-case class CookFood(order: RestaurantOrder, ttl: Long = System.currentTimeMillis() + 3000) extends Message with HaveTTL
-case class PriceOrder(order: RestaurantOrder) extends Message
-case class TakePayment(order: RestaurantOrder) extends Message
+case class CookFood(order: RestaurantOrder, corrId: String, causeId: String, ttl: Long = System.currentTimeMillis() + 3000) extends Message with HaveTTL
+case class PriceOrder(order: RestaurantOrder, corrId: String, causeId: String) extends Message
+case class TakePayment(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 
-case class OrderPlaced(order: RestaurantOrder, ttl: Long = System.currentTimeMillis() + 3000) extends Message with HaveTTL
-case class OrderCooked(order: RestaurantOrder) extends Message
-case class OrderPriced(order: RestaurantOrder) extends Message
-case class OrderPaid(order: RestaurantOrder) extends Message
+case class OrderPlaced(order: RestaurantOrder, corrId: String, causeId: String, ttl: Long = System.currentTimeMillis() + 3000) extends Message with HaveTTL
+case class OrderCooked(order: RestaurantOrder, corrId: String, causeId: String) extends Message
+case class OrderPriced(order: RestaurantOrder, corrId: String, causeId: String) extends Message
+case class OrderPaid(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 
 trait Handler[T <: Message] {
   def handle(t: T)
@@ -51,7 +53,12 @@ class TopicBasedPubSub extends CanPublish with CanSubscribe{
   var subscribers: Map[String, List[Handler[_ <: Message]]] = Map()
 
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = {
-    subscribers.getOrElse(ct.runtimeClass.getSimpleName ,Nil).foreach{ handler =>
+    _publish(ct.runtimeClass.getSimpleName, event)
+    _publish(event.corrId, event)
+  }
+
+  def _publish[T <: Message](topic: String, event: T)(implicit ct: ClassTag[T]): Unit = {
+    subscribers.getOrElse(topic ,Nil).foreach{ handler =>
       handler.asInstanceOf[Handler[T]].handle(event)
     }
   }
@@ -88,10 +95,13 @@ object EventStorePubSub extends CanPublish with CanSubscribe {
   }
 
 
-
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = ???
 
   def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T]): Unit = ???
+}
+
+class OrderTracer extends Handler[Message] {
+  def handle(t: Message): Unit = println(s"Trace: $t")
 }
 
 class OrderPrinter extends Handler[Message] {
@@ -122,7 +132,7 @@ class TTLHandler[T <: Message](handler: Handler[T]) extends Handler[T] {
     case e: HaveTTL if e.ttl > System.currentTimeMillis() =>
       handler.handle(t)
     case e: HaveTTL =>
-      println(s"Dropping order ${e.id}")
+      println(s"Dropping order ${e.msgId}")
     case e =>
       handler.handle(e)
   }
@@ -193,7 +203,7 @@ class Waiter(publisher: CanPublish) {
   def placeOrder(tableNumber: Int, lineItems: List[LineItem]): UUID = {
     val newOrder = new RestaurantOrder().tableNumber(tableNumber).lineItems(lineItems)
     println(s"${this.getClass.getSimpleName}: Place order ${newOrder.id}")
-    publisher.publish(OrderPlaced(newOrder))
+    publisher.publish(OrderPlaced(newOrder, newOrder.id.toString, "initial"))
     newOrder.id
   }
 }
@@ -214,7 +224,7 @@ class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String
       case None => throw new RuntimeException(s"Can not cook: ${li.name}")
       case Some(is) => is
     })
-    publisher.publish(OrderCooked(order.ingredients(ingredients)))
+    publisher.publish(OrderCooked(order.ingredients(ingredients), t.corrId, t.msgId))
   }
 }
 
@@ -232,28 +242,28 @@ class AssistantManager(bus: CanPublish) extends Handler[PriceOrder] {
       case Some(x) => x
     }) * li.qty)
     val taxes = total * 0.14
-    bus.publish(OrderPriced(order.total(total).tax(taxes)))
+    bus.publish(OrderPriced(order.total(total).tax(taxes), t.corrId, t.msgId))
   }
 }
 
 // aka "the controller"
 class Cashier(publisher: CanPublish) extends Handler[TakePayment] {
 
-  var pendingOrders: Map[UUID, RestaurantOrder] = Map()
+  var pendingOrders: Map[UUID, TakePayment] = Map()
 
   def ordersToPay = pendingOrders.keys.toList
 
   def handle(t: TakePayment): Unit = {
     println(s"${this.getClass.getSimpleName}: Ready for payment ${t.order.id}")
-    pendingOrders = pendingOrders + (t.order.id -> t.order)
+    pendingOrders = pendingOrders + (t.order.id -> t)
   }
 
   def paid(orderId: UUID): Boolean = {
     if(pendingOrders.contains(orderId)) {
-      val order = pendingOrders(orderId)
+      val takePayment = pendingOrders(orderId)
       println(s"${this.getClass.getSimpleName}: Paying $orderId")
       pendingOrders = pendingOrders - orderId
-      publisher.publish(OrderPaid(order.paid(true)))
+      publisher.publish(OrderPaid(takePayment.order.paid(true), takePayment.corrId, takePayment.msgId))
       true
     } else {
       false
