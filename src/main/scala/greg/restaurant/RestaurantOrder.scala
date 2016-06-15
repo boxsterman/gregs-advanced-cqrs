@@ -77,6 +77,34 @@ class TopicBasedPubSub extends CanPublish with CanSubscribe{
     }
 }
 
+case class DelayedPublish(msg: Message, delayInSecs: Int, corrId: String, causeId: String) extends Message
+
+class Scheduler(publish: CanPublish) extends Handler[DelayedPublish] with Startable {
+
+  var msgsToPublish: List[(Long, Message)] = Nil
+
+  def handle(t: DelayedPublish): Unit =
+    msgsToPublish = (System.currentTimeMillis() + t.delayInSecs * 1000, t.msg) :: msgsToPublish
+
+  def start: Unit = {
+    new Thread(new Runnable {
+      def run(): Unit = {
+        while(true) {
+          val msgsDue = msgsToPublish.filter( x => x._1 < System.currentTimeMillis())
+          msgsDue.foreach{ x =>
+            println(s"Publish delayed message: $x")
+            publish.publish(x._2)
+          }
+          msgsToPublish = msgsToPublish diff msgsDue
+          Thread.sleep(200)
+        }
+      }
+    }).start()
+  }
+}
+
+
+
 trait Midget extends Handler[Message]{
   val corrId: String
   def start()

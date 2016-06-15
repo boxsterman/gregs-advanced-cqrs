@@ -29,23 +29,45 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       | }
     """.stripMargin))
 
+
+
+  "A Scheduler" should {
+    "send a delayed message" in {
+      var events: List[Message] = Nil
+      val bus = new CanPublish {
+        def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
+      }
+
+      val s = new Scheduler(bus)
+      s.start
+      val toSend = OrderPaid(null, null, null)
+      s.handle(DelayedPublish(toSend, 1, "", ""))
+      Thread.sleep(300)
+      events shouldBe empty
+
+      Thread.sleep(900)
+      events.size should equal(1)
+      events.head should equal(toSend)
+    }
+  }
+
   "A PayAfterMidget" should {
 
     "respond properly" in {
 
       var events: List[Message] = Nil
-      var migdetCompleted = false
+      var midgetCompleted = false
       val bus = new CanPublish {
         def publish[T <: Message](event: T)(implicit ct: ClassManifest[T]): Unit = events = event :: events
       }
 
       val order = RestaurantOrder.newOrder(UUID.randomUUID())
       val orderPlaced = OrderPlaced(order, "17", "no")
-      val m = new PayAfterMidget(bus, orderPlaced, x => migdetCompleted = true)
+      val m = new PayAfterMidget(bus, orderPlaced, x => midgetCompleted = true)
 
       m.start()
 
-      migdetCompleted shouldBe false
+      midgetCompleted shouldBe false
       events.size should equal(1)
       events.head.corrId should equal("17")
       events.head.causeId should equal(orderPlaced.msgId)
@@ -59,7 +81,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       val foodCooked = FoodCooked(order, "17", "no")
       m.handle(foodCooked)
 
-      migdetCompleted shouldBe false
+      midgetCompleted shouldBe false
       events.size should equal(1)
       events.head.corrId should equal("17")
       events.head.causeId should equal(foodCooked.msgId)
@@ -73,7 +95,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       val orderPriced = OrderPriced(order, "17", "no")
       m.handle(orderPriced)
 
-      migdetCompleted shouldBe false
+      midgetCompleted shouldBe false
       events.size should equal(1)
       events.head.corrId should equal("17")
       events.head.causeId should equal(orderPriced.msgId)
@@ -87,7 +109,7 @@ class RestaurantOrderSpec extends WordSpec with Matchers {
       val orderPaid = OrderPaid(order, "17", "no")
       m.handle(orderPaid)
 
-      migdetCompleted shouldBe true
+      midgetCompleted shouldBe true
       events.size should equal(0)
     }
 
