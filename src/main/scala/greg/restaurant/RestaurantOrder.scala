@@ -1,11 +1,16 @@
 package greg.restaurant
 
+import java.net.InetSocketAddress
 import java.util.UUID
 
+import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
+import eventstore.tcp.ConnectionActor
+import eventstore.{EsException, EventNumber, EventStream, ReadEvent, ReadEventCompleted, Settings, UserCredentials}
 import play.api.libs.json._
 
 import scala.collection.mutable
 import scala.reflect.ClassTag
+import scala.util.Failure
 
 case class LineItem(name: String, qty: Int)
 
@@ -58,31 +63,36 @@ class TopicBasedPubSub extends CanPublish with CanSubscribe{
     }
 }
 
-//object EventStorePubSub extends CanPublish with CanSubscribe {
-//
-//  val system = ActorSystem()
-//  val settings = Settings(
-//    address = new InetSocketAddress("127.0.0.1", 1113),
-//    defaultCredentials = Some(UserCredentials("admin", "changeit")))
-//
-//  val connection = system.actorOf(ConnectionActor.props(settings))
-////  implicit val readResult = system.actorOf(Props[ReadResult])
-//
-//  connection ! ReadEvent(EventStream.Id("my-stream"), EventNumber.First)
-//
-//
-//
-//
-//  def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = ???
-//
-//  def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T]): Unit = ???
-//}
+object EventStorePubSub extends CanPublish with CanSubscribe {
+
+  val system = ActorSystem()
+  val settings = Settings(
+    address = new InetSocketAddress("127.0.0.1", 1113),
+    defaultCredentials = Some(UserCredentials("admin", "changeit")))
+
+  val connection = system.actorOf(ConnectionActor.props(settings))
+  implicit val readResult = system.actorOf(Props[ReadResult])
+
+  connection ! ReadEvent(EventStream.Id("my-stream"), EventNumber.First)
+
+  class ReadResult extends Actor with ActorLogging {
+    def receive = {
+      case ReadEventCompleted(event) =>
+        log.info("event: {}", event)
+        context.system.terminate()
+
+      case Failure(e: EsException) =>
+        log.error(e.toString)
+        context.system.terminate()
+    }
+  }
 
 
 
+  def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = ???
 
-
-
+  def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T]): Unit = ???
+}
 
 class OrderPrinter extends Handler[Message] {
 
