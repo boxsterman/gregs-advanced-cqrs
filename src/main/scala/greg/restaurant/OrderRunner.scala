@@ -27,7 +27,10 @@ object OrderRunner extends App {
 
   val waiter = new Waiter(bus121)
 
-  val ths = List(assi, cookAnke, cookSven, cookCarsten, mfDispatcher)
+  val midgetHouse = new ThreadedHandler(new MidgetHouse(bus121, bus121))
+  bus121.subscribe(midgetHouse)
+
+  val ths = List(assi, cookAnke, cookSven, cookCarsten, mfDispatcher, midgetHouse)
 
   // start
   println("=> start")
@@ -46,7 +49,12 @@ object OrderRunner extends App {
 
   // run it
   println("=> run")
-  var orderIds: List[UUID] = (1 to 100).map(i => waiter.placeOrder(42, List(LineItem("Steak", 1)))).toList
+  var orderIds: List[UUID] = (1 to 2).map{ i =>
+    val newOrderId = UUID.randomUUID()
+    bus121.subscribe(newOrderId.toString, new OrderTracer)
+    waiter.placeOrder(newOrderId, 42, List(LineItem("Steak", 1)))
+  }.toList
+
 
   // Variant: only pay pending orders
   while(true) {

@@ -25,7 +25,7 @@ case class PriceOrder(order: RestaurantOrder, corrId: String, causeId: String) e
 case class TakePayment(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 
 case class OrderPlaced(order: RestaurantOrder, corrId: String, causeId: String, ttl: Long = System.currentTimeMillis() + 3000) extends Message with HaveTTL
-case class OrderCooked(order: RestaurantOrder, corrId: String, causeId: String) extends Message
+case class FoodCooked(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 case class OrderPriced(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 case class OrderPaid(order: RestaurantOrder, corrId: String, causeId: String) extends Message
 
@@ -47,28 +47,69 @@ trait CanPublish {
 
 trait CanSubscribe {
   def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T])
+  def subscribe[T <: Message](name: String, handler: Handler[T])
 }
 
 class TopicBasedPubSub extends CanPublish with CanSubscribe{
   var subscribers: Map[String, List[Handler[_ <: Message]]] = Map()
 
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = {
-    _publish(ct.runtimeClass.getSimpleName, event)
     _publish(event.corrId, event)
+    _publish(ct.runtimeClass.getSimpleName, event)
   }
 
   def _publish[T <: Message](topic: String, event: T)(implicit ct: ClassTag[T]): Unit = {
-    subscribers.getOrElse(topic ,Nil).foreach{ handler =>
+    val p = subscribers.getOrElse(topic ,Nil).map(x => x)
+    p.foreach{ handler =>
       handler.asInstanceOf[Handler[T]].handle(event)
     }
   }
 
   def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T]): Unit =
+    _subscribe(ct.runtimeClass.getSimpleName, handler)
+
+  def subscribe[T <: Message](name: String, handler: Handler[T]): Unit =
+    _subscribe(name, handler)
+
+  def _subscribe[T <: Message](name: String, handler: Handler[T]): Unit =
     subscribers.synchronized {
-      val name = ct.runtimeClass.getSimpleName
       subscribers = subscribers + (name -> (handler :: subscribers.getOrElse(name, Nil)))
     }
 }
+
+class MidgetHouse(pub: CanPublish, sub: CanSubscribe) extends Handler[OrderPlaced] {
+
+  var midgetToCorrId: Map[String, Midget] = Map()
+
+  class Midget(pub: CanPublish, op: OrderPlaced, completeHandler: Midget => Unit) extends Handler[Message] {
+    val corrId = op.corrId
+    pub.publish(CookFood(op.order, op.corrId, op.msgId))
+
+    def handle(t: Message): Unit = t match {
+      case m: FoodCooked => pub.publish(PriceOrder(m.order, m.corrId, m.msgId))
+      case m: OrderPriced => pub.publish(TakePayment(m.order, m.corrId, m.msgId))
+      case m: OrderPaid => onComplete(this)
+      case _ =>
+    }
+  }
+
+  def onComplete(m: Midget) = {
+    println(s"Midget completed: ${m.corrId}")
+    midgetToCorrId = midgetToCorrId - m.corrId
+  }
+
+  def handle(t: OrderPlaced): Unit = {
+    println(s"Creating new midget for ${t.corrId}")
+    val midget = new Midget(pub, t, onComplete)
+    midgetToCorrId = midgetToCorrId + (t.corrId -> midget)
+    sub.subscribe(t.corrId, new Handler[Message] {
+      def handle(t: Message): Unit = midget.handle(t)
+    })
+  }
+
+}
+
+
 
 object EventStorePubSub extends CanPublish with CanSubscribe {
 
@@ -98,10 +139,12 @@ object EventStorePubSub extends CanPublish with CanSubscribe {
   def publish[T <: Message](event: T)(implicit ct: ClassTag[T]): Unit = ???
 
   def subscribe[T <: Message](handler: Handler[T])(implicit ct: ClassTag[T]): Unit = ???
+
+  def subscribe[T <: Message](name: String, handler: Handler[T]): Unit = ???
 }
 
 class OrderTracer extends Handler[Message] {
-  def handle(t: Message): Unit = println(s"Trace: $t")
+  def handle(t: Message): Unit = println(s"Trace: ${t.corrId} => $t")
 }
 
 class OrderPrinter extends Handler[Message] {
@@ -200,8 +243,8 @@ class MFDispatcher[T <: Message](handlers: List[ThreadedHandler[T]]) extends Han
 
 // aka "the publisher"
 class Waiter(publisher: CanPublish) {
-  def placeOrder(tableNumber: Int, lineItems: List[LineItem]): UUID = {
-    val newOrder = new RestaurantOrder().tableNumber(tableNumber).lineItems(lineItems)
+  def placeOrder(orderId: UUID, tableNumber: Int, lineItems: List[LineItem]): UUID = {
+    val newOrder = RestaurantOrder.newOrder(orderId).tableNumber(tableNumber).lineItems(lineItems)
     println(s"${this.getClass.getSimpleName}: Place order ${newOrder.id}")
     publisher.publish(OrderPlaced(newOrder, newOrder.id.toString, "initial"))
     newOrder.id
@@ -224,7 +267,7 @@ class Cook(publisher: CanPublish, cookingTimeInMillis: Long = 1000, name: String
       case None => throw new RuntimeException(s"Can not cook: ${li.name}")
       case Some(is) => is
     })
-    publisher.publish(OrderCooked(order.ingredients(ingredients), t.corrId, t.msgId))
+    publisher.publish(FoodCooked(order.ingredients(ingredients), t.corrId, t.msgId))
   }
 }
 
@@ -313,6 +356,7 @@ class RestaurantOrder(val json: JsObject = JsObject(List("id" -> JsString(UUID.r
 }
 
 object RestaurantOrder {
+  def newOrder(id: UUID) = new RestaurantOrder(JsObject(List("id" -> JsString(id.toString))))
   def fromJsonString(jsonString: String) = new RestaurantOrder(Json.parse(jsonString).as[JsObject])
   def asJsonString(order: RestaurantOrder) = Json.prettyPrint(order.json)
 }
